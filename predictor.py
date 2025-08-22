@@ -1,4 +1,4 @@
-﻿# predictor.py
+# predictor.py
 from __future__ import annotations
 
 import io
@@ -13,6 +13,7 @@ warnings.filterwarnings("ignore")
 
 # ===== Streamlit / Plotly =====
 import streamlit as st
+st.set_page_config(page_title="Weekly Sales Predictor", layout="wide")  # must be first Streamlit call
 import plotly.graph_objects as go
 
 # ===== ML / Metrics =====
@@ -26,6 +27,13 @@ try:
     HIJRI_OK = True
 except Exception:
     HIJRI_OK = False
+
+# Try boto3 presence (so missing boto3 won't crash local runs)
+try:
+    import boto3  # noqa: F401
+    BOTO3_OK = True
+except Exception:
+    BOTO3_OK = False
 
 # =============================================================================
 # Config & paths (portable for Streamlit Cloud)
@@ -50,18 +58,22 @@ MAX_WEEKS = 130
 # Secrets helper (works locally & on Streamlit Cloud)
 # =============================================================================
 def get_secret(key: str, default: Optional[str] = None) -> Optional[str]:
+    # prefer env (avoids "No secrets file" spam locally)
+    val = os.getenv(key)
+    if val not in (None, ""):
+        return val
     try:
-        return st.secrets[key]  # Streamlit Cloud
+        return st.secrets.get(key, default)  # on Cloud this exists
     except Exception:
-        return os.getenv(key, default)  # local dev / env
+        return default
 
-# Toggle S3 persistence with secrets
-USE_S3 = bool(get_secret("STORE_S3_BUCKET"))
+# Toggle S3 persistence only if bucket present AND boto3 is installed
 S3_BUCKET = get_secret("STORE_S3_BUCKET")
 S3_KEY    = get_secret("STORE_S3_KEY", "stored_weekly.csv")
 AWS_REGION = get_secret("AWS_REGION", "us-east-1")
 AWS_ACCESS_KEY_ID = get_secret("AWS_ACCESS_KEY_ID")
 AWS_SECRET_ACCESS_KEY = get_secret("AWS_SECRET_ACCESS_KEY")
+USE_S3 = bool(S3_BUCKET) and BOTO3_OK
 
 # =============================================================================
 # Flexible loader
@@ -360,22 +372,30 @@ def load_weekly_store_s3(fallback: pd.DataFrame) -> pd.DataFrame:
 # =============================================================================
 # Streamlit UI
 # =============================================================================
-st.set_page_config(page_title="Weekly Sales Predictor", layout="wide")
 st.title("📈 Weekly Sales Predictor")
 
-# Upload (top) + mode + horizon
+# Upload & controls
 up = st.file_uploader("Upload your dataset (CSV / Excel / Parquet / JSON)",
                       type=["csv", "xlsx", "xls", "parquet", "json", "jsonl"])
 
+# What should the app do if NO file is uploaded?
+fallback_choice = st.selectbox(
+    "If no file is uploaded...",
+    ["Train on bundled default.csv (demo)", "Do not run (require upload)"],
+    index=0,
+    help="Choose whether to run with the bundled demo file or wait for a user upload."
+)
+
+# Upload mode only matters when a file IS uploaded
 mode = st.radio(
-    "Upload mode",
+    "Upload mode (only used when a file is uploaded)",
     ["Train on new file", "Update existing history"],
     help="• Train on new file: replace working history with this file.\n• Update existing history: append/overwrite new weeks into stored history."
 )
 
 horizon = st.number_input("Prediction limit (weeks)", min_value=1, max_value=156, value=12, step=1)
 
-# --- Load DEFAULT to seed store and for fallback ---
+# --- Load DEFAULT to seed/for demo ---
 try:
     df_default_raw, _ = load_dataset(DEFAULT_PATH)
     date_col_def, ord_col_def, rev_col_def = autodetect_columns(df_default_raw)
@@ -395,20 +415,11 @@ except Exception as e:
     st.error(f"Failed to read default.csv: {e}")
     st.stop()
 
-# Load store: S3 if configured; else local
-try:
-    if USE_S3:
-        weekly_store = load_weekly_store_s3(weekly_default)
-    else:
-        weekly_store = load_weekly_store_local(weekly_default)
-except Exception as e:
-    st.error(f"Failed to load store: {e}")
-    st.stop()
-
 # --- If user uploaded a file, preprocess it to weekly ---
 weekly_new = None
 df_raw = None
 date_col = ord_col = rev_col = None
+
 if up:
     try:
         df_raw, meta = load_dataset(up)
@@ -430,35 +441,57 @@ if up:
         st.error(f"Failed to process uploaded file: {e}")
         st.stop()
 
-# --- Decide training weekly series based on mode ---
-if up and mode == "Train on new file":
-    weekly_train = weekly_new.copy()
-    try:
-        if USE_S3:
-            save_weekly_store_s3(weekly_train)
-        else:
-            save_weekly_store_local(weekly_train)
-    except Exception as e:
-        st.warning(f"Could not persist new store: {e}")
-    st.info("Training on the uploaded file (replaced stored history).")
-elif up and mode == "Update existing history":
-    merged = weekly_store.copy()
-    if weekly_new is not None and not weekly_new.empty:
-        merged = merged.combine_first(weekly_new)
-        merged.update(weekly_new)
-        merged = merged.sort_index()
+# --- Decide the training series ---
+if up:
+    # Only load store if we actually need it (for update mode)
+    weekly_store = None
+    if mode == "Update existing history":
         try:
             if USE_S3:
-                save_weekly_store_s3(merged)
+                weekly_store = load_weekly_store_s3(weekly_default)
             else:
-                save_weekly_store_local(merged)
+                weekly_store = load_weekly_store_local(weekly_default)
         except Exception as e:
-            st.warning(f"Could not persist updated store: {e}")
-        st.info(f"Stored history updated: {len(weekly_new)} weekly rows merged.")
-    weekly_train = merged
+            st.warning(f"S3/local store unavailable ({e}); using default only.")
+            weekly_store = weekly_default.copy()
+
+    if mode == "Train on new file":
+        weekly_train = weekly_new.copy()
+        # (Optional) persist new baseline
+        try:
+            if USE_S3:
+                save_weekly_store_s3(weekly_train)
+            else:
+                save_weekly_store_local(weekly_train)
+        except Exception as e:
+            st.warning(f"Could not persist new store: {e}")
+        st.info("Training on the uploaded file (replaced stored history).")
+
+    else:  # Update existing history
+        merged = (weekly_store if weekly_store is not None else weekly_default).copy()
+        if weekly_new is not None and not weekly_new.empty:
+            merged = merged.combine_first(weekly_new)
+            merged.update(weekly_new)
+            merged = merged.sort_index()
+            try:
+                if USE_S3:
+                    save_weekly_store_s3(merged)
+                else:
+                    save_weekly_store_local(merged)
+            except Exception as e:
+                st.warning(f"Could not persist updated store: {e}")
+            st.info(f"Stored history updated: {len(weekly_new)} weekly rows merged.")
+        weekly_train = merged
+
 else:
-    weekly_train = weekly_store.copy()
-    st.warning(f"No file uploaded. Using stored history ({len(weekly_train)} rows).")
+    # No file uploaded
+    if fallback_choice.startswith("Do not run"):
+        st.info("No dataset uploaded. Please upload a file to start.")
+        st.stop()
+    else:
+        # Train on bundled demo default.csv, NO store used
+        weekly_train = weekly_default.copy()
+        st.info("No file uploaded → training on bundled **default.csv** (demo).")
 
 # === Align weekly frequency, fill, clip ===
 if weekly_train.empty:
@@ -578,7 +611,7 @@ out = pd.DataFrame({
 out["AOV"] = out["delivered_revenue"] / np.where(out["delivered_orders"] > 0, out["delivered_orders"], np.nan)
 
 # =============================================================================
-# Single-plot visualization (Orders, Revenue, AOV) + markers (like screenshot)
+# Single-plot visualization (Orders, Revenue, AOV) + markers
 # =============================================================================
 hist = weekly.copy()
 hist["AOV"] = hist["Delivered Revenue"] / np.where(hist["Delivered Orders"] > 0, hist["Delivered Orders"], np.nan)
