@@ -1,11 +1,13 @@
-# local state
-.data/
-stored_weekly.csv
-
 # Python
 __pycache__/
 *.pyc
+.env
 
-# OS
+# Streamlit / app data
+.data/
+.streamlit/secrets.toml
+
+# OS / editor
 .DS_Store
-Thumbs.db
+.vscode/
+.idea/
