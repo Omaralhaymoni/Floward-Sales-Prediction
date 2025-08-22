@@ -1,11 +1,11 @@
 # Weekly Sales Predictor (Streamlit)
 
-Upload a CSV / Excel / Parquet / JSON to forecast weekly **Orders** & **Revenue**.
-- Modes: **Train on new file** OR **Update existing history**
-- Only control: **prediction horizon (weeks)**
-- Single plot: historical + forecast + occasion markers (Gregorian + Hijri)
+Upload a CSV/XLSX/Parquet/JSON of your transactions and get weekly forecasts of
+**Orders**, **Revenue**, and **AOV**. Includes occasion awareness (Gregorian + Hijri).
 
-## Run locally
+## Quick start (local)
+
 ```bash
+python -m venv .venv && . .venv/Scripts/activate  # on mac/linux: source .venv/bin/activate
 pip install -r requirements.txt
 streamlit run predictor.py
