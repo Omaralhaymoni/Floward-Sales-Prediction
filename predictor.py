@@ -39,8 +39,8 @@ except Exception:
 # Config & paths (portable for Streamlit Cloud)
 # =============================================================================
 APP_DIR = Path(__file__).parent
-DEFAULT_PATH = str(APP_DIR / "default.csv")      # bundled demo data (safe/public)
-STORE_PATH = APP_DIR / ".data" / "stored_weekly.csv"  # local fallback store
+DEFAULT_PATH = str(APP_DIR / "default.csv")             # bundled demo data (safe/public)
+STORE_PATH = APP_DIR / ".data" / "stored_weekly.csv"    # local fallback store
 STORE_PATH.parent.mkdir(exist_ok=True)
 
 OCCS = ["New Year", "Valentine", "Mother’s Day", "Ramadan", "Eid al-Fitr", "Eid al-Adha"]
@@ -48,9 +48,6 @@ LAGS = [1, 2, 3, 4, 8, 12, 52]
 ROLLS = [4, 8, 12]
 FOURIER_K = 3
 NEAR_WINDOW_WEEKS = 1
-AUTO_CALIBRATE = True
-MANUAL_UPLIFT = 1.05
-OCCASION_BOOST = 0.10
 CLIP_MIN = 0.0
 MAX_WEEKS = 130
 
@@ -395,6 +392,15 @@ mode = st.radio(
 
 horizon = st.number_input("Prediction limit (weeks)", min_value=1, max_value=156, value=12, step=1)
 
+# --- Optional: optimistic tuning controls ---
+with st.expander("⚙️ Tuning (optional)"):
+    uplift = st.slider("Overall forecast uplift ×", 1.00, 1.50, 1.10, 0.01,
+                       help="Multiply the final forecast by this factor.")
+    occ_boost = st.slider("Occasion uplift (+)", 0.00, 0.50, 0.15, 0.01,
+                          help="Extra fraction added on weeks flagged as occasions. 0.15 = +15%.")
+    auto_calibrate = st.checkbox("Auto-calibrate from OOF", value=True,
+                                 help="If unchecked, calibration factors are set to 1.0 (more optimistic).")
+
 # --- Load DEFAULT to seed/for demo ---
 try:
     df_default_raw, _ = load_dataset(DEFAULT_PATH)
@@ -596,11 +602,13 @@ for i in range(H):
     hist_orders  = pd.concat([hist_orders,  pd.Series([o_pred], index=[d])])
     hist_revenue = pd.concat([hist_revenue, pd.Series([r_pred], index=[d])])
 
-# Calibrate + boosts
-pred_orders  = np.maximum(np.array(pred_orders)  * (cal_orders  if AUTO_CALIBRATE else 1.0) * MANUAL_UPLIFT, CLIP_MIN)
-pred_revenue = np.maximum(np.array(pred_revenue) * (cal_revenue if AUTO_CALIBRATE else 1.0) * MANUAL_UPLIFT, CLIP_MIN)
-pred_orders  = pred_orders  * (1.0 + OCCASION_BOOST * future_is_occ[:H])
-pred_revenue = pred_revenue * (1.0 + OCCASION_BOOST * future_is_occ[:H])
+# === Calibrate + boosts (using UI knobs) ===
+pred_orders  = np.maximum(np.array(pred_orders)  * (cal_orders  if auto_calibrate else 1.0) * uplift, CLIP_MIN)
+pred_revenue = np.maximum(np.array(pred_revenue) * (cal_revenue if auto_calibrate else 1.0) * uplift, CLIP_MIN)
+
+# Extra boost on future occasion weeks
+pred_orders  = pred_orders  * (1.0 + occ_boost * future_is_occ[:H])
+pred_revenue = pred_revenue * (1.0 + occ_boost * future_is_occ[:H])
 
 out = pd.DataFrame({
     "date": future_index[:H],
@@ -754,5 +762,5 @@ st.download_button(
 st.caption(
     f"Calibration (OOF MAPE): Orders ~ {np.mean(m_os)*100:,.2f}% | Revenue ~ {np.mean(m_rev)*100:,.2f}%  ·  "
     f"Cal Factors → Orders: {cal_orders:.3f} · Revenue: {cal_revenue:.3f}  ·  "
-    f"Fixed uplift={MANUAL_UPLIFT:.2f}, occasion boost={OCCASION_BOOST*100:.0f}%"
+    f"Uplift×={uplift:.2f}, occasion boost=+{occ_boost*100:.0f}%, auto-calibrate={'on' if auto_calibrate else 'off'}"
 )
