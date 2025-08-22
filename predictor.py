@@ -367,6 +367,25 @@ def load_weekly_store_s3(fallback: pd.DataFrame) -> pd.DataFrame:
         return fallback.copy()
 
 # =============================================================================
+# Cached weekly builder (speeds up reruns)
+# =============================================================================
+@st.cache_data(show_spinner=False)
+def _weekly_from_raw(df_raw: pd.DataFrame, date_col: str, ord_col: str, rev_col: str) -> pd.DataFrame:
+    df = df_raw.copy()
+    df["Date"] = pd.to_datetime(df[date_col], errors="coerce")
+    df = df.dropna(subset=["Date"]).sort_values("Date")
+    df[ord_col] = pd.to_numeric(df[ord_col].astype(str).str.replace(",", "", regex=False), errors="coerce")
+    df[rev_col] = pd.to_numeric(df[rev_col].astype(str).str.replace(",", "", regex=False), errors="coerce")
+    df["week_start"] = df["Date"] - pd.to_timedelta((df["Date"].dt.dayofweek + 1) % 7, unit="D")
+    weekly = (
+        df.groupby(df["week_start"].dt.normalize())
+          .agg({ord_col: "sum", rev_col: "sum"})
+          .rename(columns={ord_col: "Delivered Orders", rev_col: "Delivered Revenue"})
+          .sort_index()
+    )
+    return weekly
+
+# =============================================================================
 # Streamlit UI
 # =============================================================================
 st.title("📈 Weekly Sales Predictor")
@@ -405,18 +424,7 @@ with st.expander("⚙️ Tuning (optional)"):
 try:
     df_default_raw, _ = load_dataset(DEFAULT_PATH)
     date_col_def, ord_col_def, rev_col_def = autodetect_columns(df_default_raw)
-    df_def = df_default_raw.copy()
-    df_def["Date"] = pd.to_datetime(df_def[date_col_def], errors="coerce")
-    df_def = df_def.dropna(subset=["Date"]).sort_values("Date")
-    df_def[ord_col_def] = _to_float_no_commas(df_def[ord_col_def])
-    df_def[rev_col_def] = _to_float_no_commas(df_def[rev_col_def])
-    df_def["week_start"] = df_def["Date"] - pd.to_timedelta((df_def["Date"].dt.dayofweek + 1) % 7, unit="D")
-    weekly_default = (
-        df_def.groupby(df_def["week_start"].dt.normalize())
-             .agg({ord_col_def: "sum", rev_col_def: "sum"})
-             .rename(columns={ord_col_def: "Delivered Orders", rev_col_def: "Delivered Revenue"})
-             .sort_index()
-    )
+    weekly_default = _weekly_from_raw(df_default_raw, date_col_def, ord_col_def, rev_col_def)
 except Exception as e:
     st.error(f"Failed to read default.csv: {e}")
     st.stop()
@@ -431,18 +439,7 @@ if up:
         df_raw, meta = load_dataset(up)
         date_col, ord_col, rev_col = autodetect_columns(df_raw)
         st.success(f"Loaded: **{meta['source_name']}** — shape {df_raw.shape[0]}×{df_raw.shape[1]}")
-        df_u = df_raw.copy()
-        df_u["Date"] = pd.to_datetime(df_u[date_col], errors="coerce")
-        df_u = df_u.dropna(subset=["Date"]).sort_values("Date")
-        df_u[ord_col] = _to_float_no_commas(df_u[ord_col])
-        df_u[rev_col] = _to_float_no_commas(df_u[rev_col])
-        df_u["week_start"] = df_u["Date"] - pd.to_timedelta((df_u["Date"].dt.dayofweek + 1) % 7, unit="D")
-        weekly_new = (
-            df_u.groupby(df_u["week_start"].dt.normalize())
-               .agg({ord_col: "sum", rev_col: "sum"})
-               .rename(columns={ord_col: "Delivered Orders", rev_col: "Delivered Revenue"})
-               .sort_index()
-        )
+        weekly_new = _weekly_from_raw(df_raw, date_col, ord_col, rev_col)
     except Exception as e:
         st.error(f"Failed to process uploaded file: {e}")
         st.stop()
@@ -499,6 +496,12 @@ else:
         weekly_train = weekly_default.copy()
         st.info("No file uploaded → training on bundled **default.csv** (demo).")
 
+# === Gate heavy work behind a button ===
+run = st.button("🚀 Run forecast", type="primary")
+if not run:
+    st.info("Ready. Upload a file (or use default.csv) and choose horizon, then click **Run forecast**.")
+    st.stop()
+
 # === Align weekly frequency, fill, clip ===
 if weekly_train.empty:
     st.error("No rows to train after preprocessing.")
@@ -518,6 +521,7 @@ weekly[["Delivered Orders", "Delivered Revenue"]] = weekly[["Delivered Orders", 
 # Historical occasions (rules + optional 'occasion' from raw data)
 # =============================================================================
 occ_names_hist_rules = infer_occasion_names_from_rules(weekly.index, anchor_weekday)
+# try to build weekly occasion names from raw default/upload (if columns exist)
 occ_from_default = weekly_occ_names_from_raw(df_default_raw, date_col_def)
 occ_names_hist = _combine_name_series(occ_names_hist_rules, occ_from_default)
 
@@ -544,8 +548,9 @@ feature_cols = [c for c in supervised.columns if c not in TARGETS + ["occasion_n
 X_all = supervised[feature_cols]
 y_all = supervised[TARGETS]
 
+# Lighter forest for faster starts on Cloud
 rf = RandomForestRegressor(
-    n_estimators=900, max_depth=None, min_samples_leaf=2, random_state=42, n_jobs=-1
+    n_estimators=400, max_depth=None, min_samples_leaf=2, random_state=42, n_jobs=-1
 )
 
 # OOF calibration
