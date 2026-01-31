@@ -21,7 +21,7 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.metrics import mean_absolute_percentage_error
 
-# ===== Hijri (optional) =====
+# ===== Hijri =====
 try:
     from hijri_converter import convert as hj
     HIJRI_OK = True
@@ -36,10 +36,10 @@ except Exception:
     BOTO3_OK = False
 
 # =============================================================================
-# Config & paths (portable for Streamlit Cloud)
+# Config & paths 
 # =============================================================================
 APP_DIR = Path(__file__).parent
-DEFAULT_PATH = str(APP_DIR / "default.csv")             # bundled demo data (safe/public)
+DEFAULT_PATH = str(APP_DIR / "default.csv")             # bundled demo data
 STORE_PATH = APP_DIR / ".data" / "stored_weekly.csv"    # local fallback store
 STORE_PATH.parent.mkdir(exist_ok=True)
 
@@ -52,15 +52,15 @@ CLIP_MIN = 0.0
 MAX_WEEKS = 130
 
 # =============================================================================
-# Secrets helper (works locally & on Streamlit Cloud)
+# Helpers
 # =============================================================================
 def get_secret(key: str, default: Optional[str] = None) -> Optional[str]:
-    # prefer env (avoids "No secrets file" spam locally)
+    
     val = os.getenv(key)
     if val not in (None, ""):
         return val
     try:
-        return st.secrets.get(key, default)  # on Cloud this exists
+        return st.secrets.get(key, default)  
     except Exception:
         return default
 
@@ -205,7 +205,7 @@ def autodetect_columns(df: pd.DataFrame) -> Tuple[str, str, str]:
         raise ValueError("Auto-detection failed: need a Date, Orders, and Revenue column.")
     return date_col, orders_col, revenue_col
 
-# ---------- Historical occasions from rules + optional data merge ----------
+# ---------- Historical occasions from rules + data merge ----------
 def infer_occasion_names_from_rules(index: pd.DatetimeIndex, anchor_weekday: int) -> pd.Series:
     names = []
     for d in index:
@@ -271,7 +271,7 @@ def build_flags_from_names(index: pd.DatetimeIndex, names: pd.Series) -> pd.Data
 
     return flags
 
-# ---------- Future calendar (rule-based) ----------
+# ---------- Future calendar ----------
 def build_calendar_future(index: pd.DatetimeIndex, anchor_weekday: int, t0: int):
     flags = pd.DataFrame(index=index)
     names = []
@@ -367,7 +367,7 @@ def load_weekly_store_s3(fallback: pd.DataFrame) -> pd.DataFrame:
         return fallback.copy()
 
 # =============================================================================
-# Cached weekly builder (speeds up reruns)
+# Cached weekly builder
 # =============================================================================
 @st.cache_data(show_spinner=False)
 def _weekly_from_raw(df_raw: pd.DataFrame, date_col: str, ord_col: str, rev_col: str) -> pd.DataFrame:
@@ -390,7 +390,6 @@ def _weekly_from_raw(df_raw: pd.DataFrame, date_col: str, ord_col: str, rev_col:
 # =============================================================================
 st.title("📈 Weekly Sales Predictor")
 
-# Upload & controls
 up = st.file_uploader("Upload your dataset (CSV / Excel / Parquet / JSON)",
                       type=["csv", "xlsx", "xls", "parquet", "json", "jsonl"])
 
@@ -411,7 +410,7 @@ mode = st.radio(
 
 horizon = st.number_input("Prediction limit (weeks)", min_value=1, max_value=156, value=12, step=1)
 
-# --- Optional: optimistic tuning controls ---
+# optimistic tuning controls
 with st.expander("⚙️ Tuning (optional)"):
     uplift = st.slider("Overall forecast uplift ×", 1.00, 1.50, 1.10, 0.01,
                        help="Multiply the final forecast by this factor.")
@@ -460,7 +459,7 @@ if up:
 
     if mode == "Train on new file":
         weekly_train = weekly_new.copy()
-        # (Optional) persist new baseline
+        # persist new baseline
         try:
             if USE_S3:
                 save_weekly_store_s3(weekly_train)
@@ -518,7 +517,7 @@ for c in ["Delivered Orders", "Delivered Revenue"]:
 weekly[["Delivered Orders", "Delivered Revenue"]] = weekly[["Delivered Orders", "Delivered Revenue"]].clip(lower=0)
 
 # =============================================================================
-# Historical occasions (rules + optional 'occasion' from raw data)
+# Historical occasions (rules +'occasion' from raw data)
 # =============================================================================
 occ_names_hist_rules = infer_occasion_names_from_rules(weekly.index, anchor_weekday)
 # try to build weekly occasion names from raw default/upload (if columns exist)
