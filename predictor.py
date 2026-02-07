@@ -115,7 +115,7 @@ section[data-testid="stSidebar"] *{
 }
 </style>
 """, unsafe_allow_html=True)
-l
+
 import plotly.graph_objects as go
 
 # ===== ML / Metrics =====
@@ -892,4 +892,5 @@ st.caption(
     f"Cal Factors → Orders: {cal_orders:.3f} · Revenue: {cal_revenue:.3f}  ·  "
     f"Uplift×={uplift:.2f}, occasion boost=+{occ_boost*100:.0f}%, auto-calibrate={'on' if auto_calibrate else 'off'}"
 )
+
 
