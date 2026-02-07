@@ -13,7 +13,109 @@ warnings.filterwarnings("ignore")
 
 # ===== Streamlit / Plotly =====
 import streamlit as st
-st.set_page_config(page_title="Weekly Sales Predictor", layout="wide")  # must be first Streamlit call
+st.set_page_config(page_title="Weekly Sales Predictor", layout="wide")  
+
+st.markdown("""
+<style>
+:root{
+  --bg: #00313C;
+  --text: #F0E9E0;
+  --muted: #e6d5cc;
+  --border: rgba(241,203,182,.25);
+  --card: #012a33;
+  --accent: #F0E9E0;
+  --shadow: 0 8px 24px rgba(0,0,0,.25);
+  --radius: 16px;
+}
+
+/* App background */
+html, body, [data-testid="stAppViewContainer"]{
+  background:var(--bg)!important;
+  color:var(--text)!important;
+}
+
+/* Sidebar */
+section[data-testid="stSidebar"]{
+  background:var(--bg)!important;
+  color:var(--text)!important;
+  border-right:1px solid var(--border);
+}
+section[data-testid="stSidebar"] *{
+  color:var(--text)!important;
+}
+
+/* Inputs */
+.stTextInput input,
+.stDateInput input,
+.stNumberInput input,
+.stTextArea textarea {
+  background: var(--card)!important;
+  color: var(--text)!important;
+  border: 1px solid var(--border)!important;
+  border-radius: 12px;
+}
+
+/* Selectbox & multiselect */
+.stSelectbox div[data-baseweb="select"] > div,
+.stMultiSelect div[data-baseweb="select"] > div {
+  background: var(--accent) !important;
+  color: var(--bg) !important;
+  border-radius: 12px;
+  font-weight: 600;
+}
+.stSelectbox div[data-baseweb="select"] *,
+.stMultiSelect div[data-baseweb="select"] * {
+  color: var(--bg) !important;
+}
+
+/* Dropdown menu */
+[data-baseweb="popover"] [role="listbox"]{
+  background: var(--bg) !important;
+  color: var(--text) !important;
+  border: 1px solid var(--border) !important;
+}
+[data-baseweb="popover"] [role="option"]{
+  color: var(--text) !important;
+}
+[data-baseweb="popover"] [aria-selected="true"]{
+  background: rgba(241,203,182,.15)!important;
+}
+
+/* Radio buttons */
+.stRadio [role="radio"]{
+  border:2px solid var(--accent)!important;
+  background:transparent!important;
+}
+.stRadio [aria-checked="true"]{
+  background: var(--accent)!important;
+  color: var(--bg)!important;
+}
+
+/* Slider */
+.stSlider [role="slider"]{
+  background: var(--accent)!important;
+}
+.stSlider [data-testid="stThumbValue"]{
+  background: var(--bg)!important;
+  color: var(--text)!important;
+  border:1px solid var(--accent)!important;
+}
+
+/* Buttons */
+.stButton>button{
+  background: var(--accent)!important;
+  color: var(--bg)!important;
+  border-radius:999px;
+  padding:10px 18px;
+  font-weight:700;
+  box-shadow: var(--shadow);
+}
+.stButton>button:hover{
+  filter:brightness(1.05);
+}
+</style>
+""", unsafe_allow_html=True)
+l
 import plotly.graph_objects as go
 
 # ===== ML / Metrics =====
@@ -388,7 +490,29 @@ def _weekly_from_raw(df_raw: pd.DataFrame, date_col: str, ord_col: str, rev_col:
 # =============================================================================
 # Streamlit UI
 # =============================================================================
-st.title("📈 Weekly Sales Predictor")
+hero = st.container()
+with hero:
+    col_logo, col_text = st.columns([1, 6], gap="large")
+
+    with col_logo:
+        try:
+            st.image("logo.png", width=90)
+        except Exception:
+            pass
+
+    with col_text:
+        st.markdown(
+            """
+            <h1 style="margin:0; font-size:clamp(26px,4vw,40px); color: var(--text);">
+              Weekly Sales Predictor
+            </h1>
+            <p style="margin-top:6px; color: var(--muted);">
+              Forecast weekly orders & revenue with seasonality and occasions
+            </p>
+            """,
+            unsafe_allow_html=True
+        )
+
 
 up = st.file_uploader("Upload your dataset (CSV / Excel / Parquet / JSON)",
                       type=["csv", "xlsx", "xls", "parquet", "json", "jsonl"])
@@ -411,7 +535,7 @@ mode = st.radio(
 horizon = st.number_input("Prediction limit (weeks)", min_value=1, max_value=156, value=12, step=1)
 
 # optimistic tuning controls
-with st.expander("⚙️ Tuning (optional)"):
+with st.expander("⚙️ Tuning (optional)", expanded=False):
     uplift = st.slider("Overall forecast uplift ×", 1.00, 1.50, 1.10, 0.01,
                        help="Multiply the final forecast by this factor.")
     occ_boost = st.slider("Occasion uplift (+)", 0.00, 0.50, 0.15, 0.01,
@@ -768,3 +892,4 @@ st.caption(
     f"Cal Factors → Orders: {cal_orders:.3f} · Revenue: {cal_revenue:.3f}  ·  "
     f"Uplift×={uplift:.2f}, occasion boost=+{occ_boost*100:.0f}%, auto-calibrate={'on' if auto_calibrate else 'off'}"
 )
+
